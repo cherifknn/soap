@@ -15,22 +15,21 @@
       overflow: hidden;
       font-family: sans-serif;
     }
-    
-    /* Fixed Header */
+    /* Fixed Header (centered using flex) */
     header {
       position: fixed;
       top: 0;
       left: 0;
       width: 100%;
       padding: 1rem;
-      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       font-family: 'League Spartan', sans-serif;
       font-size: 2rem;
       color: #14106B;
       z-index: 20;
-      pointer-events: none;
     }
-    
     /* Main area occupies full viewport */
     main {
       position: absolute;
@@ -38,10 +37,20 @@
       left: 0;
       width: 100%;
       height: 100%;
-      overflow: hidden;
+      overflow: visible;
     }
-    
-    /* SVG for connecting lines */
+    /* The universe container (viewport) for bubbles and lines.
+       This is zoomable/pannable, while UI elements remain fixed. */
+    #viewport {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2000px;
+      height: 2000px;
+      transform-origin: 0 0;
+      touch-action: none;
+    }
+    /* SVG for connecting lines inside the universe */
     #connections {
       position: absolute;
       top: 0;
@@ -50,8 +59,7 @@
       height: 100%;
       z-index: 0;
     }
-    
-    /* BUBBLE STYLES updated per specs */
+    /* Bubble Styles per specs */
     .bubble {
       position: absolute;
       width: 88.26px;
@@ -67,7 +75,9 @@
       font-weight: 400;
       font-size: 22px;
       line-height: 20px;
-
+      /* Draft CSS properties (may not be supported everywhere) 
+      leading-trim: both;
+      text-edge: cap;*/
       color: #333;
       cursor: pointer;
       user-select: none;
@@ -80,41 +90,50 @@
     .bubble.selected {
       border: 2px solid #4282f5;
     }
-    
-    /* Friend addition controls at bottom:
-       Placed with horizontal margins so both input and button fit on one line */
-    .friend-controls {
+    /* Fixed Connection Filter Buttons above friend input */
+    .connection-controls {
       position: fixed;
-      bottom: 16px;
+      bottom: 80px;
       left: 16px;
       right: 16px;
       display: flex;
-      gap: 8px;
+      justify-content: space-around;
       z-index: 30;
     }
-    .friend-controls input {
+    .connection-controls button {
       background: #fff;
       border: none;
-      border-radius: 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      padding: 8px 12px;
-      font-size: 0.9rem;
-      flex: 1;
-    }
-    .friend-controls button {
-      background: #fff;
-      border: none;
-      border-radius: 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      padding: 8px 16px;
-      cursor: pointer;
+      border-radius: 8px;
+      box-shadow: 0px 1px 2px rgba(0,0,0,0.3), 0px 1px 3px rgba(0,0,0,0.15);
+      padding: 6px 12px;
       font-size: 0.9rem;
       color: #14106B;
     }
-    .friend-controls button:hover {
+    .connection-controls button:hover {
       box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     }
-    
+    /* Fixed Friend Input Bar at Bottom (iPhone 16 Pro styling) */
+    .friend-controls {
+      position: fixed;
+      bottom: 16px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      z-index: 30;
+    }
+    .friend-controls input {
+      width: 355px;
+      height: 51px;
+      background: #FFFFFF;
+      box-shadow: 0px 1px 2px rgba(0,0,0,0.3), 0px 1px 3px 1px rgba(0,0,0,0.15);
+      border-radius: 16px;
+      border: none;
+      font-style: italic;
+      text-align: center;
+      font-size: 1rem;
+      padding: 0 12px;
+    }
     /* Modal for Main Bubble Creation */
     .modal {
       position: fixed;
@@ -155,17 +174,15 @@
     .modal-content button:hover {
       background: #3a70d0;
     }
-    
     /* Edge highlight styling */
     line.highlight {
       stroke: #4282f5;
       stroke-width: 4;
     }
-    
-    /* Ensure responsive layout on smaller screens */
+    /* Responsive: on small screens, friend input width adjusts */
     @media (max-width: 600px) {
-      .friend-controls {
-        flex-direction: row;
+      .friend-controls input {
+        width: 90%;
       }
     }
   </style>
@@ -183,41 +200,119 @@
   </div>
   
   <main>
-    <svg id="connections"></svg>
+    <!-- The viewport is the universe that holds bubbles and connections -->
+    <div id="viewport">
+      <svg id="connections"></svg>
+    </div>
   </main>
   
-  <!-- Fixed Friend Addition Bar at the Bottom -->
+  <!-- Degree Filter Buttons -->
+  <div class="connection-controls">
+    <button id="filter1">1st</button>
+    <button id="filter2">2nd</button>
+    <button id="filter3">3rd</button>
+    <button id="clearFilter">All</button>
+  </div>
+  
+  <!-- Friend Input Bar at Bottom -->
   <div class="friend-controls">
-    <input type="text" id="friendInput" placeholder="Add friend" />
-    <button id="addFriendBtn">Add</button>
+    <input type="text" id="friendInput" placeholder="Add a friend..." />
   </div>
   
   <!-- Socket.IO client script from server -->
   <script src="/socket.io/socket.io.js"></script>
   <script>
     /************************************************************
-     * CLIENT-SIDE (Socket.IO + Force Layout + Selection)
+     * CLIENT-SIDE (Socket.IO + Force Layout + Selection + Pan/Zoom + Filtering)
      ************************************************************/
     const socket = io();
 
     // DOM references
     const mainModal = document.getElementById("mainModal");
     const mainBubbleInput = document.getElementById("mainBubbleInput");
-    const createBubbleBtn = document.getElementById("createBubbleBtn");
     const friendInput = document.getElementById("friendInput");
-    const addFriendBtn = document.getElementById("addFriendBtn");
     const connectionsSVG = document.getElementById("connections");
-    const mainArea = document.querySelector("main");
+    const viewport = document.getElementById("viewport");
+    const filter1Btn = document.getElementById("filter1");
+    const filter2Btn = document.getElementById("filter2");
+    const filter3Btn = document.getElementById("filter3");
+    const clearFilterBtn = document.getElementById("clearFilter");
 
-    const BUBBLE_SIZE = 88.26; // new bubble dimension
+    const BUBBLE_SIZE = 88.26; // bubble dimension
+
+    // Variables for pan & zoom (applied only to the viewport)
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let initialDistance = null;
+    let initialScale = 1;
+    let lastTouchMid = null;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+    let lastTranslate = { x: 0, y: 0 };
+
+    function updateTransform() {
+      viewport.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    }
+
+    // Touch event handlers for pinch zoom and pan on the universe (#viewport)
+    viewport.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 2) {
+        initialDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialScale = scale;
+        lastTouchMid = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+        };
+      } else if (e.touches.length === 1) {
+        isPanning = true;
+        panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        lastTranslate = { x: translateX, y: translateY };
+      }
+    });
+
+    viewport.addEventListener("touchmove", (e) => {
+      if (e.touches.length === 2 && initialDistance) {
+        const currentDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        scale = initialScale * (currentDistance / initialDistance);
+        const currentMid = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+        };
+        translateX = lastTranslate.x + (currentMid.x - lastTouchMid.x);
+        translateY = lastTranslate.y + (currentMid.y - lastTouchMid.y);
+        updateTransform();
+      } else if (e.touches.length === 1 && isPanning) {
+        const dx = e.touches[0].clientX - panStart.x;
+        const dy = e.touches[0].clientY - panStart.y;
+        translateX = lastTranslate.x + dx;
+        translateY = lastTranslate.y + dy;
+        updateTransform();
+      }
+      e.preventDefault();
+    });
+
+    viewport.addEventListener("touchend", (e) => {
+      if (e.touches.length < 2) {
+        initialDistance = null;
+        isPanning = false;
+      }
+    });
 
     // Local bubble data: { name, x, y, element }
     const bubbles = {};
     // Local edges: [ { sourceName, targetName, lineElement }, ... ]
     const edges = [];
     
-    // For selection highlighting
+    // For selection highlighting and filtering
     let selectedBubbles = [];
+    let mainBubbleName = null;
 
     /************************************************************
      * Socket.IO Events
@@ -251,8 +346,7 @@
         const el = document.createElement("div");
         el.className = "bubble";
         el.textContent = name;
-        mainArea.appendChild(el);
-        // Add click listener for selection highlighting
+        viewport.appendChild(el);
         el.addEventListener("click", () => handleBubbleClick(bubbleObj));
         bubbleObj = { name, x, y, element: el };
         bubbles[name] = bubbleObj;
@@ -283,14 +377,12 @@
     }
 
     /************************************************************
-     * Selection Handling
+     * Selection Handling & Filtering
      ************************************************************/
     function handleBubbleClick(bubbleObj) {
-      // If two bubbles are already selected and the new click is not one of them, clear selection.
       if (selectedBubbles.length === 2 && !selectedBubbles.includes(bubbleObj.name)) {
         clearSelection();
       }
-      // Toggle selection
       const index = selectedBubbles.indexOf(bubbleObj.name);
       if (index > -1) {
         selectedBubbles.splice(index, 1);
@@ -326,14 +418,12 @@
 
     // BFS to find a path between two bubbles (by name)
     function findPath(source, target) {
-      // Build adjacency list
       const adj = {};
       Object.keys(bubbles).forEach(name => { adj[name] = []; });
       edges.forEach(edge => {
         adj[edge.sourceName].push(edge.targetName);
         adj[edge.targetName].push(edge.sourceName);
       });
-      // BFS
       const queue = [source];
       const visited = {};
       visited[source] = null;
@@ -348,7 +438,6 @@
         });
       }
       if (!(target in visited)) return [];
-      // Reconstruct path as array of edge pairs
       const path = [];
       let cur = target;
       while (visited[cur] !== null) {
@@ -356,7 +445,6 @@
         cur = visited[cur];
       }
       path.reverse();
-      // Map each pair to its corresponding edge object
       const pathEdges = [];
       path.forEach(pair => {
         const [a, b] = pair;
@@ -370,33 +458,96 @@
     }
 
     /************************************************************
-     * UI Event: Create Main Bubble (Modal)
+     * Filtering Connections by Degree
      ************************************************************/
-    createBubbleBtn.addEventListener("click", () => {
-      const mainName = mainBubbleInput.value.trim();
-      if (!mainName) return;
-      socket.emit("SET_MAIN_BUBBLE", { mainName });
-      mainModal.style.display = "none";
+    function filterConnections(degree) {
+      if (!mainBubbleName) return;
+      const adj = {};
+      Object.keys(bubbles).forEach(name => { adj[name] = []; });
+      edges.forEach(edge => {
+        adj[edge.sourceName].push(edge.targetName);
+        adj[edge.targetName].push(edge.sourceName);
+      });
+      const distances = {};
+      const queue = [mainBubbleName];
+      distances[mainBubbleName] = 0;
+      while (queue.length > 0) {
+        const current = queue.shift();
+        const currentDist = distances[current];
+        if (currentDist >= degree) continue;
+        (adj[current] || []).forEach(neighbor => {
+          if (distances[neighbor] === undefined) {
+            distances[neighbor] = currentDist + 1;
+            queue.push(neighbor);
+          }
+        });
+      }
+      // Update bubble visibility
+      Object.keys(bubbles).forEach(name => {
+        if (name === mainBubbleName || (distances[name] !== undefined && distances[name] <= degree)) {
+          bubbles[name].element.style.display = "flex";
+        } else {
+          bubbles[name].element.style.display = "none";
+        }
+      });
+      // Update edge visibility
+      edges.forEach(e => {
+        if (
+          bubbles[e.sourceName].element.style.display !== "none" &&
+          bubbles[e.targetName].element.style.display !== "none"
+        ) {
+          e.lineElement.style.display = "block";
+        } else {
+          e.lineElement.style.display = "none";
+        }
+      });
+    }
+
+    // Event listeners for filter buttons
+    filter1Btn.addEventListener("click", () => filterConnections(1));
+    filter2Btn.addEventListener("click", () => filterConnections(2));
+    filter3Btn.addEventListener("click", () => filterConnections(3));
+    clearFilterBtn.addEventListener("click", () => {
+      Object.keys(bubbles).forEach(name => {
+        bubbles[name].element.style.display = "flex";
+      });
+      edges.forEach(e => {
+        e.lineElement.style.display = "block";
+      });
     });
 
     /************************************************************
-     * UI Event: Add Friend
+     * UI Event: Create Main Bubble (Modal)
      ************************************************************/
-    addFriendBtn.addEventListener("click", () => {
-      const friendName = friendInput.value.trim();
-      if (!friendName) return;
-      socket.emit("ADD_FRIENDS", { friends: [friendName] });
-      friendInput.value = "";
+    document.getElementById("createBubbleBtn").addEventListener("click", () => {
+      const mainName = mainBubbleInput.value.trim();
+      if (!mainName) return;
+      // Center the main bubble in the universe (2000x2000)
+      socket.emit("SET_MAIN_BUBBLE", { mainName, x: 1000 - BUBBLE_SIZE/2, y: 1000 - BUBBLE_SIZE/2 });
+      mainBubbleName = mainName;
+      document.getElementById("mainModal").style.display = "none";
+    });
+
+    /************************************************************
+     * UI Event: Add Friend on Enter Key
+     ************************************************************/
+    friendInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const friendName = friendInput.value.trim();
+        if (!friendName) return;
+        socket.emit("ADD_FRIENDS", { friends: [friendName] });
+        friendInput.value = "";
+      }
     });
 
     /************************************************************
      * FORCE LAYOUT / PHYSICS ANIMATION
      ************************************************************/
     function animate() {
-      const { width, height } = mainArea.getBoundingClientRect();
       const bubbleArray = Object.values(bubbles);
 
-      // 1) Repel bubbles from each other
+      // Repel bubbles
       const repelForce = 2000;
       for (let i = 0; i < bubbleArray.length; i++) {
         for (let j = i + 1; j < bubbleArray.length; j++) {
@@ -430,7 +581,7 @@
         }
       }
 
-      // 2) Spring edges together
+      // Spring edges together
       const springLength = 100;
       const springStiffness = 0.01;
       edges.forEach(e => {
@@ -451,17 +602,11 @@
         B.y += fy;
       });
 
-      // 3) Constrain bubbles within screen
       bubbleArray.forEach(b => {
-        if (b.x < 0) b.x = 0;
-        if (b.x > width - BUBBLE_SIZE) b.x = width - BUBBLE_SIZE;
-        if (b.y < 0) b.y = 0;
-        if (b.y > height - BUBBLE_SIZE) b.y = height - BUBBLE_SIZE;
         b.element.style.left = b.x + "px";
         b.element.style.top  = b.y + "px";
       });
 
-      // 4) Update line positions
       edges.forEach(e => {
         const A = bubbles[e.sourceName];
         const B = bubbles[e.targetName];
