@@ -23,12 +23,13 @@ const edges = [];
  ************************************************************/
 function createOrUpdateBubble(name, x, y) {
   if (!bubbles[name]) {
-    const randX = Math.floor(Math.random() * 400) + 50;
-    const randY = Math.floor(Math.random() * 300) + 50;
+    // Use provided coordinates if available; otherwise, use random ones
+    const randX = x !== undefined ? x : Math.floor(Math.random() * 400) + 50;
+    const randY = y !== undefined ? y : Math.floor(Math.random() * 300) + 50;
     bubbles[name] = {
       name,
-      x: x !== undefined ? x : randX,
-      y: y !== undefined ? y : randY,
+      x: randX,
+      y: randY,
     };
   } else {
     if (x !== undefined) bubbles[name].x = x;
@@ -64,11 +65,11 @@ io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
   socket.emit("INIT_DATA", { bubbles, edges });
 
-  // User sets their main bubble once: data = { mainName }
+  // User sets their main bubble once: data = { mainName, x, y }
   socket.on("SET_MAIN_BUBBLE", (data) => {
-    const { mainName } = data;
+    const { mainName, x, y } = data;
     userMainBubbles[socket.id] = mainName;
-    createOrUpdateBubble(mainName);
+    createOrUpdateBubble(mainName, x, y);
   });
 
   // User adds friends (up to 10): data = { friends: ["Bob", "Charlie"] }
